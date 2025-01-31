@@ -1,3 +1,4 @@
 [submodule "contrib/dwarfidl"]
 	path = contrib/dwarfidl
 	url = https://github.com/difcsi/dwarfidl.git
+	branch = master
