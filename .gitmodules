@@ -1,4 +1,7 @@
 [submodule "contrib/dwarfidl"]
 	path = contrib/dwarfidl
 	url = https://github.com/difcsi/dwarfidl.git
+<<<<<<< Updated upstream
 	branch = master
+=======
+>>>>>>> Stashed changes
