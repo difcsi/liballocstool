@@ -419,6 +419,7 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 		}
 		++i_rel;
 	}
+	if (done_some_output) std::cerr << "\n";
 }
 static void set_symbol_length(std::ostream& out, const string& mangled_name, unsigned length)
 {
@@ -1785,7 +1786,7 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 
 		try
 		{
-			get_types_by_codeless_uniqtype_name(types_by_codeless_uniqtype_name, 
+			get_types_by_codeless_uniqtype_name(types_by_codeless_uniqtype_name,
 				r.begin(), r.end());
 		}
 		catch (lib::Error)
@@ -2324,6 +2325,7 @@ void get_types_by_codeless_uniqtype_name(
 			}
 		}
 	}
+	if (done_some_output) std::cerr << "\n";
 }
 
 } // end namespace tool
