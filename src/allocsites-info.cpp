@@ -267,7 +267,7 @@ cu_loop_exit:
 				cerr << *(*i_cu)->get_name();
 			}
 			cerr << ") but required by allocsite: " << objname
-			<< "<" << clean_typename << "> @" << std::hex << file_addr << std::dec << ">" << endl;
+			<< "<" << clean_typename << "> @ vaddr " << std::hex << file_addr << std::dec << ">" << endl;
 
 		if (second_chance_type)
 		{
