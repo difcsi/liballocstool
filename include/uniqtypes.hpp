@@ -234,17 +234,6 @@ name_for_complement_base_type(iterator_df<base_type_die> base_t);
 string 
 summary_code_to_string(opt<uint32_t> code);
 
-// iterator_df<type_die>
-// find_type_in_cu(iterator_df<compile_unit_die> cu, const string& name);
-
-inline string mangle_spaces(const string& s)
-{
-	string mangled = s ;
-	replace(mangled.begin(), mangled.end(), ' ', '_');
-
-	return mangled;
-}
-
 inline string mangle_string(const string& s)
 {
 	string mangled = s;
@@ -303,22 +292,7 @@ iterator_df<type_die> get_or_create_uninterpreted_byte_type(root_die& r);
 inline opt<string>
 type_die_get_name(iterator_df<type_die> t)
 {
-	/* Normally we just return the name. However: HACK HACK HACK. 
-	 * If it's a CIL name like __anon(struct|union)_BLAH_nn, we erase the nn. 
-	 * This is so that we don't generate nominally distinct types 
-	 * in different compilation units. */
-	/*if (t.name_here() && (t.name_here()->find("__anonstruct_") == 0
-					|| t.name_here()->find("__anonunion_") == 0
-					|| t.name_here()->find("__anonenum_") == 0))
-	{
-		string replacement_name = *t.name_here();
-		unsigned last_underscore_pos = replacement_name.find_last_of('_');
-		assert(last_underscore_pos && last_underscore_pos + 1 < replacement_name.length());
-		replacement_name.replace(last_underscore_pos, 
-			replacement_name.length() - last_underscore_pos, "_1");
-		return replacement_name;
-	}
-	else*/ if (t.is_a<core::subprogram_die>())
+	if (t.is_a<core::subprogram_die>())
 	{
 		/* When interpreted as types, subprograms don't have names. */
 		return opt<string>();
