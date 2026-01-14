@@ -2268,27 +2268,9 @@ void get_types_by_codeless_uniqtype_name(
 			auto concrete_t = t->get_concrete_type();
 			pair<string, string> uniqtype_name_pair;
 			string canonical_typename = dwarf::core::abstract_name_for_type(t);
-			
-			/* CIL/trumptr will only generate references to aliases in the case of 
-			 * base types. We need to handle these here. What should happen? 
-			 * 
-			 * - we will see references looking like __uniqtype__signed_char
-			 * - we want to link in two things:
-			 *    1. the nameless __uniqtype_<code>_ definition of this base type
-			 *    2. the alias    __uniqtype_<code>_signed_char from the usual alias handling
-			 * - we do this by indexing all our types by a *codeless* version of their
-			 *   name, then matching our inputs lines against that.
-			 * - the input lines will have signed_char instead of ""
-			 * - ... so that's what we need to put in our index.
-			 * 
-			 * IT GETS WORSE: the same is true for any typename *mentioning* a base
-			 * type! We will see references in terms of C-canonicalised base type names, 
-			 * but we will be trying to match them against language-independent names. 
-			 * It seems that we need to do a separate "C fix up" pass first.
-			 * This is now done in link-used-types (and will be 
-			 * */
-			
-			
+			/* CIL/dumpallocs/trumptr no longer generate references to aliases, even
+			 * in the case of base types. */
+
 			if (canonical_typename == "")
 			{
 				assert(concrete_t.is_a<base_type_die>());
