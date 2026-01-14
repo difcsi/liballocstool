@@ -154,9 +154,14 @@ struct frame_element
 	{ return effective_expr_piece.size_in_bytes(); }
 
 	optional<Dwarf_Signed> has_fixed_offset_from_frame_base() const;
-	/*optional<Dwarf_Signed>*/ bool has_fixed_register() const
-	{ return effective_expr_piece.op_count() == 1 && ( (effective_expr_piece.last_op().lr_atom >= DW_OP_reg0
-		&& effective_expr_piece.last_op().lr_atom <= DW_OP_reg31) || effective_expr_piece.last_op().lr_atom == DW_OP_regx ); }
+	optional<Dwarf_Signed> has_fixed_register() const
+	{ if (effective_expr_piece.op_count() != 1) return optional<Dwarf_Signed>();
+	  if (effective_expr_piece.last_op().lr_atom >= DW_OP_reg0
+	   && effective_expr_piece.last_op().lr_atom <= DW_OP_reg31) return optional<Dwarf_Signed>(
+	       effective_expr_piece.last_op().lr_atom - DW_OP_reg0);
+	  if (effective_expr_piece.last_op().lr_atom == DW_OP_regx) return optional<Dwarf_Signed>(
+	       effective_expr_piece.last_op().lr_number);
+	  return optional<Dwarf_Signed>(); }
 	/*optional<loc_expr>*/ bool has_value_function() const // strip DW_OP_stack_value at end? NO
 	{ return effective_expr_piece.op_count() >= 1 && effective_expr_piece.last_op().lr_atom == DW_OP_stack_value; }
 	                       // has_location implies has_value_function? just put deref at the end?
@@ -197,6 +202,9 @@ struct frame_element
 	bool has_implicit_value() const
 	{ return has_implicit_pointer_value() || has_implicit_literal_value(); }
 
+	/* The CFA itself is weird. It is "located at" "a fixed offset from the
+	 * frame base", but it is not stored! */
+	inline bool is_current_cfa() const;
 	/* A single location expression need not denote a fixed offset
 	 * or fixed register. When they don't, it makes life harder
 	 * for us. How often does this happen? I think for now
@@ -204,7 +212,12 @@ struct frame_element
 	 * ACTUALLY treat them like computed values, where internally
 	 * we compute the location and then deref it. */
 	/*optional<loc_expr>*/ bool has_location() const          // does not exclude fixed offset/register
-	{ return !has_value_function() && !has_implicit_value(); }
+	{ return !has_value_function() && !has_implicit_value() &&
+	  /* UNTESTED: added to handle case of DW_OP_piece following empty expression;
+	   * see with_static_location_die::file_relative_intervals in libdwarfpp's dies.cpp. */
+	  (is_current_cfa() || effective_expr_piece.op_count() > 0); }
+	bool is_stored() const
+	{ return has_location() && !is_current_cfa(); }
 	/*optional<loc_expr>*/ bool has_varying_location() const // does exclude
 	{ return has_location() && !has_fixed_offset_from_frame_base() && !has_fixed_register(); }
 
@@ -216,8 +229,7 @@ struct frame_element
 	optional<Dwarf_Signed> is_saved_register() const
 	{ return (m_caller_regnum && *m_caller_regnum != DW_FRAME_CFA_COL3)
 	  ? m_caller_regnum : optional<Dwarf_Signed>(); }
-	bool is_current_cfa() const
-	{ return (m_caller_regnum && *m_caller_regnum == DW_FRAME_CFA_COL3); }
+
 	iterator_df<with_dynamic_location_die> is_local() const { return m_local; }
 
 	/* When constructing, we always need to have a PC range:
@@ -242,6 +254,8 @@ public:
 		core::FrameSection& fs,
 		subprogram_vaddr_interval_map_t const& subprograms);
 };
+inline bool frame_element::is_current_cfa() const
+{ return (m_caller_regnum && *m_caller_regnum == DW_FRAME_CFA_COL3); }
 
 typedef boost::icl::interval_map<
 		Dwarf_Off /* interval base type */,
