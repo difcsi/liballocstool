@@ -73,23 +73,6 @@ find_equal_range_last(typename boost::icl::interval_map<Dwarf_Addr, V>::iterator
 	return i_last_equal; // note that the equal range is right-closed: [start, i_last_equal]
 }
 
-struct subprogram_key : public pair< pair<string, string>, string > // ordering for free
-{
-	subprogram_key(const string& subprogram_name, const string& sourcefile_name, 
-		const string& comp_dir) : pair(make_pair(subprogram_name, sourcefile_name), comp_dir) {}
-	string subprogram_name() const { return first.first; }
-	string sourcefile_name() const { return first.second; }
-	string comp_dir() const { return second; }
-};
-
-/* We gather subprograms by the ranges they cover
- * AND by their identity (key). */
-typedef boost::icl::interval_map<
-	Dwarf_Off,
-	/* It's a set only so that we can detect and warn about overlaps... */
-	std::set< pair< subprogram_key, iterator_df<subprogram_die> > >
-> subprogram_vaddr_interval_map_t;
-
 /* What's a frame element?
  * It's a piece of a frame. We have boiled away some of the DWARF features --
  * location lists / multiple vaddr ranges (each frame element only applies

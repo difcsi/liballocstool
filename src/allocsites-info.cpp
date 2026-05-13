@@ -17,6 +17,7 @@
 #include <fileno.hpp>
 #include <dwarfidl/create.hpp>
 
+#include "subprograms-util.hpp"
 #include "allocsites-info.hpp"
 
 using std::cin;
@@ -127,9 +128,79 @@ create_arr0_type_for_element_type(root_die& r, iterator_df<type_die> element_t)
 					created.offset_here(), DW_AT_type))));
 	return created;
 }
+iterator_df<type_die> allocsite::find_alloc_type_in_dwarf(root_die& r,
+	subprogram_vaddr_interval_map_t const& subprograms_by_vaddr)
+{
+	/* Search the DWARF call site information.
+	 * First find the subprogram that contains the file vaddr. */
+	auto found = subprograms_by_vaddr.find(this->file_addr);
+	if (found != subprograms_by_vaddr.end())
+	{
+		auto subp_set = found->second;
+		if (subp_set.size() == 0) return iterator_base::END;
+		else if (subp_set.size() > 1)
+		{
+			std::cerr << "Strange: address " << std::hex << this->file_addr << std::dec
+				<< " has multiple subprograms at it. Skipping." << std::endl;
+			return iterator_base::END;
+		}
+		auto i_subp = subp_set.begin()->second;
+		/* Iterate breadth-first looking for DIEs describing all sites
+		 * (DW_TAG_call_site, DW_TAG_GNU_call_site, DW_TAG_inlined_subroutine) */
+		iterator_bf_skipping_types start_bf(i_subp);
+		unsigned start_depth = i_subp.depth();
+		for (iterator_bf_skipping_types i_bf = start_bf;
+			i_bf != core::iterator_base::END;
+			/* After the first inc, we should always be at *at least* 1 + start_depth. */
+			i_bf.increment(start_depth + 1))
+		{
+#ifndef DW_TAG_call_site
+#define DW_TAG_call_site 0x48
+#endif
+			if (i_bf.tag_here() == DW_TAG_call_site
+			    || i_bf.tag_here() == DW_TAG_GNU_call_site
+			/*||  i_bf.tag_here() == DW_TAG_inlined_subroutine*/)
+				// skip inlined for now, because there is no unique entry address
+				// and moreover, our tools (objdumpallocs) don't find these sites
+				// (inlined allocation functions are a pretty niche case anyway)
+			{
+#ifndef DW_AT_call_return_pc
+#define DW_AT_call_return_pc 0x7d
+#endif
+				auto attrs = i_bf.copy_attrs();
+				auto found = attrs.find(DW_AT_call_return_pc);
+				if (found != attrs.end())
+				{
+					Dwarf_Addr return_pc = found->second.get_address().addr;
+					if (return_pc == this->file_addr)
+					{
+#ifndef DW_AT_LLVM_alloc_type
+#define DW_AT_LLVM_alloc_type 0x3e0e
+#endif
+						found = attrs.find(DW_AT_LLVM_alloc_type);
+#ifdef DW_AT_alloc_type
+						if (found == attrs.end())
+						{
+							found = attrs.find(DW_AT_alloc_type); // second chance
+						}
+#endif
+						if (found != attrs.end())
+						{
+							/* Found it! */
+							return found->second.get_refiter_is_type();
+						}
+					}
+				}
+			}
+		}
+	}
+	return iterator_base::END;
+}
 iterator_df<type_die> allocsite::find_named_type(root_die& r, const multimap<string, iterator_df<type_die> >& types_by_codeless_name)
 {
 	if (this->found_type) return this->found_type;
+	/* we shouldn't be called unless we have a 'clean_typename'. */
+	assert(this->clean_typename);
 	iterator_df<compile_unit_die> found_cu;
 	opt<string> found_sourcefile_path;
 	iterator_df<type_die> found_type;
@@ -177,26 +248,26 @@ iterator_df<type_die> allocsite::find_named_type(root_die& r, const multimap<str
 					embodying_cus.push_back(i_cu);
 
 					// void comes out in the allocsites
-					if (this->clean_typename.size() > 0 &&
-						(this->clean_typename == "__uniqtype____uninterpreted_byte"
-						|| this->clean_typename == "__uniqtype__void"))
+					if (this->clean_typename->size() > 0 &&
+						(*this->clean_typename == "__uniqtype____uninterpreted_byte"
+						|| *this->clean_typename == "__uniqtype__void"))
 					{
 						found_type = get_or_create_uninterpreted_byte_type(r); // i.e. void
 						goto cu_loop_exit;
 					}
-					else if (this->clean_typename.size() > 0 &&
-						(this->clean_typename == "__uniqtype____EXISTS1___PTR__1"))
+					else if (this->clean_typename->size() > 0 &&
+						(*this->clean_typename == "__uniqtype____EXISTS1___PTR__1"))
 					{
 						found_type = get_or_create_generic_pointer_type(r);
 						goto cu_loop_exit;
 					}
-					else if (clean_typename.size() > 0)
+					else if (clean_typename->size() > 0)
 					{
-						auto found_types = types_by_codeless_name.equal_range(this->clean_typename);
+						auto found_types = types_by_codeless_name.equal_range(*this->clean_typename);
 						if (found_types.first == found_types.second)
 						{
 							cerr << "Found no types for symbol name "
-								<< this->clean_typename << "; unique symbol names were: " << endl;
+								<< *this->clean_typename << "; unique symbol names were: " << endl;
 							set<string> uniques;
 							for (auto i_el = types_by_codeless_name.begin();
 								i_el != types_by_codeless_name.end(); ++i_el)
@@ -258,7 +329,7 @@ iterator_df<type_die> allocsite::find_named_type(root_die& r, const multimap<str
 cu_loop_exit:
 	if (!found_type)
 	{
-		cerr << "Warning: no type named " << clean_typename
+		cerr << "Warning: no type named " << *clean_typename
 			<< " in CUs embodying source file " << sourcefile
 			<< " (found " << embodying_cus.size() << ":";
 			for (auto i_cu = embodying_cus.begin(); i_cu != embodying_cus.end(); ++i_cu)
@@ -267,7 +338,7 @@ cu_loop_exit:
 				cerr << *(*i_cu)->get_name();
 			}
 			cerr << ") but required by allocsite: " << objname
-			<< "<" << clean_typename << "> @ vaddr " << std::hex << file_addr << std::dec << ">" << endl;
+			<< "<" << *clean_typename << "> @ vaddr " << std::hex << file_addr << std::dec << ">" << endl;
 
 		if (second_chance_type)
 		{
@@ -288,7 +359,7 @@ cu_loop_exit:
 	bool is_incomplete = !found_type->calculate_byte_size();
 	if (this->might_be_array && is_incomplete)
 	{
-		std::cerr << "WARNING: dumpallocs thought an allocation of " << clean_typename
+		std::cerr << "WARNING: dumpallocs thought an allocation of " << *clean_typename
 			<< " might be an array, but it's incomplete" << std::endl;
 		this->might_be_array = false;
 	}
@@ -303,12 +374,17 @@ ensure_needed_types_and_assign_to_allocsites(root_die& r, vector<allocsite>& as)
 	multimap<string, iterator_df<type_die> > types_by_codeless_name;
 	get_types_by_codeless_uniqtype_name(types_by_codeless_name,
 		r.begin(), r.end());
+	// also want a fast lookup of subprogram by vaddr
+	subprogram_vaddr_interval_map_t subprograms_by_vaddr;
+	map<subprogram_key, iterator_df<subprogram_die> > subprograms_by_key;
+	gather_defined_subprograms(r, subprograms_by_vaddr, subprograms_by_key);
+
 	vector<iterator_df<type_die> > types_we_created;
 	for (auto i_a = as.begin(); i_a != as.end(); ++i_a)
 	{
 		if (i_a->is_synthetic)
 		{
-			cerr << "Found synthetic typename " << i_a->clean_typename;
+			cerr << "Found synthetic typename " << *i_a->clean_typename;
 			/* Add under the last CU in the file, to avoid (for now) offset woes. */
 			auto cus_seq = r.begin().children().subseq_of<compile_unit_die>();
 			auto last_cu = cus_seq.first;
@@ -331,7 +407,7 @@ ensure_needed_types_and_assign_to_allocsites(root_die& r, vector<allocsite>& as)
 			};
 			auto before_snapshot = snapshot_types();
 			// if we got here, "clean_typename" is actually a dwarfidl expression
-			auto created = dwarfidl::create_dies(last_cu, i_a->clean_typename);
+			auto created = dwarfidl::create_dies(last_cu, *i_a->clean_typename);
 			assert(created);
 			assert(created.is_a<type_die>());
 			auto after_snapshot = snapshot_types();
@@ -344,7 +420,7 @@ ensure_needed_types_and_assign_to_allocsites(root_die& r, vector<allocsite>& as)
 			// update the allocsite record with the type we just created
 			i_a->found_type = created.as_a<type_die>();
 			// rewrite clean typename to the codeless symname, i.e. what dumpallocs would generate
-			i_a->clean_typename = mangle_typename(make_pair("", codeful_name(created).second));
+			*i_a->clean_typename = mangle_typename(make_pair("", codeful_name(created).second));
 			auto add_type = [&types_we_created, &types_by_codeless_name](iterator_df<type_die> t) {
 				auto name_pair = codeful_name(t);
 				types_we_created.push_back(t);
@@ -359,11 +435,12 @@ ensure_needed_types_and_assign_to_allocsites(root_die& r, vector<allocsite>& as)
 		}
 		else
 		{
-			auto found_named_type = i_a->find_named_type(r, types_by_codeless_name);
+			auto found_type = i_a->find_named_type(r, types_by_codeless_name);
+			if (!found_type) found_type = i_a->find_alloc_type_in_dwarf(r, subprograms_by_vaddr);
 			if (DECLARE_AS_ARRAY0(*i_a))
 			{
 				auto codeless_arr0_name = mangle_typename(make_pair("",
-					string("__ARR_") + codeful_name(found_named_type).second));
+					string("__ARR_") + codeful_name(found_type).second));
 				auto found_arr0 = types_by_codeless_name.find(codeless_arr0_name);
 				if (found_arr0 != types_by_codeless_name.end())
 				{
@@ -371,14 +448,14 @@ ensure_needed_types_and_assign_to_allocsites(root_die& r, vector<allocsite>& as)
 				}
 				else // create it
 				{
-					auto created = create_arr0_type_for_element_type(r, found_named_type);
+					auto created = create_arr0_type_for_element_type(r, found_type);
 					i_a->found_type = created.as_a<type_die>();
 					assert(0 == strncmp(codeful_name(i_a->found_type).second.c_str(),
 						"__ARR_", 6));
 					types_we_created.push_back(i_a->found_type);
 				}
 			}
-			else i_a->found_type = found_named_type;
+			else i_a->found_type = found_type;
 		}
 	}
 	return types_we_created;
@@ -394,24 +471,35 @@ read_allocsites(std::istream& in)
 	string sourcefile; 
 	unsigned line;
 	unsigned end_line;
-	string alloc_typename;
-	bool might_be_array;
-	
+	opt<string> alloc_typename;
+	bool might_be_array = true; // default to "yes, might be"
+	/*  ^^ might_be_array will not be touched by read_allocs_line unless it find a typename  */
+
 	vector<allocsite> allocsites_to_add;
 	
 	opt<string> seen_objname;
 	
 	while (in.getline(buf, sizeof buf - 1)
-		&& 0 == read_allocs_line(string(buf), objname, symname, file_addr, sourcefile, line, end_line, alloc_typename, might_be_array))
+		&& 0 == read_allocs_line(string(buf), objname, symname, file_addr, sourcefile, line,
+			end_line, alloc_typename, might_be_array))
 	{
-		string nonconst_typename = alloc_typename;
-		string clean_typename = nonconst_typename;
-		boost::trim(clean_typename);
+		opt<string> maybe_clean_typename;
+		bool is_synthetic = false;
+		if (alloc_typename)
+		{
+			string nonconst_typename = *alloc_typename;
+			string trimmed_nonconst_typename = nonconst_typename; boost::trim(trimmed_nonconst_typename);
+			maybe_clean_typename = trimmed_nonconst_typename;
+			is_synthetic = (trimmed_nonconst_typename.substr(0, sizeof "__uniqtype_" - 1) != "__uniqtype_");
+		}
+		else
+		{
+			// pass the maybe as none... we can find another way to look up the type later
+		}
 		
 		allocsites_to_add.push_back((allocsite){
-			clean_typename, sourcefile, objname, file_addr,
-			/* is_synthetic */ clean_typename.substr(0, sizeof "__uniqtype_" - 1) != "__uniqtype_",
-			might_be_array
+			maybe_clean_typename, sourcefile, objname, file_addr,
+			is_synthetic, might_be_array
 		});
 	} // end while read line
 	cerr << "Found " << allocsites_to_add.size() << " allocation sites" << endl;
@@ -440,7 +528,7 @@ int read_allocs_line(
 	string& cuname,
 	unsigned& line,
 	unsigned& end_line,
-	string& alloc_typename,
+	opt<string>& alloc_typename,
 	bool& might_be_array
 )
 {
@@ -449,6 +537,7 @@ int read_allocs_line(
 	string file_addrstr;
 	string linestr;
 	string endlinestr;
+	string alloc_typenamestr;
 	string might_be_array_str;
 
 	#define report_error(fieldname, buf) \
@@ -463,24 +552,33 @@ int read_allocs_line(
 	std::getline(s, objname, '\t'); check_error(s, objname, str);
 	std::getline(s, symname, '\t'); check_error(s, symname, str);
 	std::getline(s, file_addrstr, '\t'); check_error(s, offset, str);
-	std::getline(s, cuname, '\t'); check_error(s, cuname, str);
-	std::getline(s, linestr, '\t'); check_error(s, line, str);
-	std::getline(s, endlinestr, '\t'); check_error(s, endline, str);
-	std::getline(s, alloc_targetfun, '\t'); check_error(s, alloc_targetfun, str);
-	std::getline(s, alloc_typename, '\t'); check_error(s, alloc_typename, str);
-	std::getline(s, might_be_array_str, '\t'); check_error(s, might_be_array, str);
-	// don't bother reading rest -- the line below doesn't work
-	//std::getline(s, rest, '\n'); check_error(s, rest);
-
 	if (file_addrstr.substr(0, 2) != "0x") 
 	{
 		cerr << "str is " << str << "\nfile_addrstr is " << file_addrstr << endl;
 		report_error(file_addr, file_addrstr);
 	}
 	istringstream offsetstream(file_addrstr.substr(2)); offsetstream >> std::hex >> file_addr; check_error(offsetstream, file_addr, file_addrstr);
+
+	std::getline(s, cuname, '\t'); check_error(s, cuname, str);
+	std::getline(s, linestr, '\t'); check_error(s, line, str);
 	istringstream linestream(linestr); linestream >> line; check_error(linestream, line, linestr);
+	std::getline(s, endlinestr, '\t'); check_error(s, endline, str);
 	istringstream endlinestream(endlinestr); endlinestream >> end_line; check_error(endlinestream, end_line, endlinestr);
-	istringstream might_be_array_stream(might_be_array_str); might_be_array_stream >> might_be_array; check_error(might_be_array_stream, might_be_aray, might_be_array_str);
+	std::getline(s, alloc_targetfun, '\t'); check_error(s, alloc_targetfun, str);
+	/* From here on, we might not have the info. */
+	std::getline(s, alloc_typenamestr, '\t');
+	if (!s.bad())
+	{
+		/* We got a typename, so continue with the rest */
+		alloc_typename = alloc_typenamestr;
+		std::getline(s, might_be_array_str, '\t'); check_error(s, might_be_array, str);
+		istringstream might_be_array_stream(might_be_array_str); might_be_array_stream >> might_be_array; check_error(might_be_array_stream, might_be_aray, might_be_array_str);
+	}
+	else
+	{
+		/* No typename... */
+	}
+
 	return 0;
 }
 

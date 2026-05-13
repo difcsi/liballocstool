@@ -10,6 +10,7 @@
 #include <boost/optional.hpp>
 
 #include "uniqtypes.hpp"
+#include "subprograms-util.hpp"
 
 namespace allocs
 {
@@ -24,13 +25,14 @@ using namespace dwarf;
 
 struct allocsite
 {
-	string clean_typename;
+	opt<string> clean_typename;
 	string sourcefile;
 	string objname;
 	unsigned file_addr;
 	bool is_synthetic;
 	bool might_be_array;
 	iterator_df<core::type_die> found_type;
+	iterator_df<core::type_die> find_alloc_type_in_dwarf(root_die& r, subprogram_vaddr_interval_map_t const& subprograms_by_vaddr);
 	iterator_df<core::type_die> find_named_type(root_die& r, const multimap<string, iterator_df<type_die> >& types_by_codeless_name);
 };
 
@@ -51,7 +53,7 @@ int read_allocs_line(
 	string& cuname,
 	unsigned& line,
 	unsigned& end_line,
-	string& alloc_typename,
+	opt<string>& alloc_typename,
 	bool& might_be_array
 );
 // HACK now that this field is not explicit

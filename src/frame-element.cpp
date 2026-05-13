@@ -17,6 +17,7 @@
 #include <dwarfpp/regs.hpp>
 
 #include "stickyroot.hpp"
+#include "subprograms-util.hpp"
 #include "frame-element.hpp"
 
 using std::cin;
