@@ -13,6 +13,7 @@
 #include <dwarfpp/lib.hpp>
 #include <dwarfpp/frame.hpp>
 
+#include "subprograms-util.hpp"
 #include "stickyroot.hpp"
 
 namespace allocs {
