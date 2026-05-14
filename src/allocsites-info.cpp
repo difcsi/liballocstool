@@ -438,6 +438,15 @@ ensure_needed_types_and_assign_to_allocsites(root_die& r, vector<allocsite>& as)
 			iterator_df<type_die> found_type = iterator_base::END;
 			if (i_a->clean_typename) found_type = i_a->find_named_type(r, types_by_codeless_name);
 			if (!found_type) found_type = i_a->find_alloc_type_in_dwarf(r, subprograms_by_vaddr);
+			/* We may still have no type for the allocation site.
+			 * At this stage, we should skip it if so. */
+			if (!found_type)
+			{
+				std::cerr << "No type found for allocation site at address 0x" << std::hex
+					<< i_a->file_addr << std::dec << " in " << i_a->objname
+					<< "(in " << i_a->sourcefile << ")" << std::endl;
+				continue;
+			}
 			if (DECLARE_AS_ARRAY0(*i_a))
 			{
 				auto codeless_arr0_name = mangle_typename(make_pair("",
