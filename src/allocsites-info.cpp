@@ -567,7 +567,7 @@ int read_allocs_line(
 	std::getline(s, alloc_targetfun, '\t'); check_error(s, alloc_targetfun, str);
 	/* From here on, we might not have the info. */
 	std::getline(s, alloc_typenamestr, '\t');
-	if (!s.bad())
+	if (!s.bad() && alloc_typenamestr.length() > 0)
 	{
 		/* We got a typename, so continue with the rest */
 		alloc_typename = alloc_typenamestr;
