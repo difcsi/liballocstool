@@ -435,7 +435,8 @@ ensure_needed_types_and_assign_to_allocsites(root_die& r, vector<allocsite>& as)
 		}
 		else
 		{
-			auto found_type = i_a->find_named_type(r, types_by_codeless_name);
+			iterator_df<type_die> found_type = iterator_base::END;
+			if (i_a->clean_typename) found_type = i_a->find_named_type(r, types_by_codeless_name);
 			if (!found_type) found_type = i_a->find_alloc_type_in_dwarf(r, subprograms_by_vaddr);
 			if (DECLARE_AS_ARRAY0(*i_a))
 			{
