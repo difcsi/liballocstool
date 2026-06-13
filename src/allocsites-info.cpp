@@ -586,7 +586,13 @@ int read_allocs_line(
 	}
 	else
 	{
-		/* No typename... */
+		/* No typename for this line. We MUST clear the out-params: they are
+		 * reused across calls by read_allocsites (it declares them once,
+		 * outside its read loop), so if we leave them untouched a typeless
+		 * entry silently inherits the previous line's typename.
+		 */
+		alloc_typename = opt<string>();
+		might_be_array = true; /* the documented default */
 	}
 
 	return 0;
