@@ -32,7 +32,7 @@ liballocstool_include_HEADERS = include/uniqtype-defs.h include/uniqtype.h inclu
 lib_LIBRARIES = src/liballocstool.a
 
 src_liballocstool_a_SOURCES = src/stickyroot.cpp src/uniqtypes.cpp src/allocsites-info.cpp \
-  src/frame-element.cpp
+  src/frame-element.cpp src/subprograms-util.cpp
 
 LIBELF ?= -lelf
 export LIBELF
@@ -92,6 +92,9 @@ endif
 
 lib/liballocstool.a: $(lib_LTLIBRARIES)
 	mkdir -p lib && cd lib && ln -sf ../src/liballocstool.a .
+# HACK to prevent ranlib from making a huge temporary file
+src/liballocstool.a: $(patsubst %.cpp,%.o,$(src_liballocstool_a_SOURCES))
+	rm -f $@; $(AR) scru $@ $+
 
 all: lib/liballocstool.a
 

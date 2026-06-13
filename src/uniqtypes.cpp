@@ -419,6 +419,7 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 		}
 		++i_rel;
 	}
+	if (done_some_output) std::cerr << "\n";
 }
 static void set_symbol_length(std::ostream& out, const string& mangled_name, unsigned length)
 {
@@ -1746,7 +1747,8 @@ static void for_each_uniqtype_reference_in(const string &filename,
 	}
 	fclose(in);
 }
-int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream& err)
+int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream& err,
+	bool continue_on_error /* = false */)
 {
 	using core::root_die;
 	using std::unique_ptr;
@@ -1768,7 +1770,7 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 		if (!infstream) 
 		{
 			err << "Could not open file " << fname << endl;
-			return 1;
+			if (continue_on_error) continue; else return 1;
 		}
 
 		try
@@ -1778,11 +1780,22 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 		catch (lib::No_entry)
 		{
 			rs[i] = nullptr;
-			continue;
+			continue; // it's never an error to contain no DWARF
 		}
 		root_die &r = *rs[i];
-		get_types_by_codeless_uniqtype_name(types_by_codeless_uniqtype_name, 
-			r.begin(), r.end());
+
+		try
+		{
+			get_types_by_codeless_uniqtype_name(types_by_codeless_uniqtype_name,
+				r.begin(), r.end());
+		}
+		catch (lib::Error)
+		{
+			err << (continue_on_error ? "Warning:" : "Error:")
+			    << " could not process DWARF types for file " << fnames[i] << endl;
+			rs[i] = nullptr;
+			if (continue_on_error) continue; else return 2;
+		}
 		
 		auto f = [&](const string& key) {
 			// FIXME: escape single quotes
@@ -2255,27 +2268,9 @@ void get_types_by_codeless_uniqtype_name(
 			auto concrete_t = t->get_concrete_type();
 			pair<string, string> uniqtype_name_pair;
 			string canonical_typename = dwarf::core::abstract_name_for_type(t);
-			
-			/* CIL/trumptr will only generate references to aliases in the case of 
-			 * base types. We need to handle these here. What should happen? 
-			 * 
-			 * - we will see references looking like __uniqtype__signed_char
-			 * - we want to link in two things:
-			 *    1. the nameless __uniqtype_<code>_ definition of this base type
-			 *    2. the alias    __uniqtype_<code>_signed_char from the usual alias handling
-			 * - we do this by indexing all our types by a *codeless* version of their
-			 *   name, then matching our inputs lines against that.
-			 * - the input lines will have signed_char instead of ""
-			 * - ... so that's what we need to put in our index.
-			 * 
-			 * IT GETS WORSE: the same is true for any typename *mentioning* a base
-			 * type! We will see references in terms of C-canonicalised base type names, 
-			 * but we will be trying to match them against language-independent names. 
-			 * It seems that we need to do a separate "C fix up" pass first.
-			 * This is now done in link-used-types (and will be 
-			 * */
-			
-			
+			/* CIL/dumpallocs/trumptr no longer generate references to aliases, even
+			 * in the case of base types. */
+
 			if (canonical_typename == "")
 			{
 				assert(concrete_t.is_a<base_type_die>());
@@ -2312,6 +2307,7 @@ void get_types_by_codeless_uniqtype_name(
 			}
 		}
 	}
+	if (done_some_output) std::cerr << "\n";
 }
 
 } // end namespace tool

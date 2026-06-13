@@ -17,6 +17,7 @@
 #include <dwarfpp/regs.hpp>
 
 #include "stickyroot.hpp"
+#include "subprograms-util.hpp"
 #include "frame-element.hpp"
 
 using std::cin;
@@ -57,19 +58,13 @@ namespace tool {
 bool operator<(const frame_element& x,
 		       const frame_element& y)
 {
-	/* This means frame_elements for the same var will always
-	 * compare equal, so we can't distinguish different effective exprs
-	 * of the same var. This would matter if we wanted to record them
-	 * at the same PC, but we don't. Still feels a bit fishy.
-	 * However, note that we can't just use the effective expression
+	/* Note that we can't just use the effective expression
 	 * because it's totally possible for the same expression to be
 	 * used for multiple local vars at the same time. */
 	return (x.m_local < y.m_local)
 		|| ((x.m_local == y.m_local) && x.m_caller_regnum < y.m_caller_regnum)
 		|| ((x.m_local == y.m_local) && (x.m_caller_regnum == y.m_caller_regnum) &&
 			x.effective_expr_piece.copy() < y.effective_expr_piece.copy())
-	//	|| ((x.first == y.first) && x.second.first.offset_here() == y.second.first.offset_here()
-	//		&& x.second.first.second.second < y.second.first.second.second );
 	;
 }
 
@@ -126,7 +121,7 @@ optional<Dwarf_Signed> frame_element::has_fixed_offset_from_frame_base() const
 		{
 			case dwarf::expr::evaluator::NAMED_REGISTER:
 				/* OK, the value lives in a register... we should have caught this! */
-				std::clog << "Troublesome expression: " << effective_expr_piece.copy_as_if_whole() << endl;
+				std::cerr << "Troublesome expression: " << effective_expr_piece.copy_as_if_whole() << endl;
 				assert(false);
 				break;
 			case dwarf::expr::evaluator::ADDRESS: // the good one
@@ -442,9 +437,11 @@ frame_element::cfi_elements_for(core::Fde fde,
 	auto result = fde.decode();
 	result.add_unfinished_row(fde.get_low_pc() + fde.get_func_length());
 
-	// enumerate our columns
+	// enumerate our columns... they are identified by a DWARF register number e.g. DWARF_X86_64_RAX
 	set<int> all_columns;
 	all_columns.insert(DW_FRAME_CFA_COL3);
+	// our "table" is jagged, i.e. different rows may have entries in different
+	// subsets of the overall available columns... we want to enumerate those overall
 	for (auto i_row = result.rows.begin(); i_row != result.rows.end(); ++i_row)
 	{
 		for (auto i_reg = i_row->second.begin(); i_reg != i_row->second.end(); ++i_reg)
@@ -453,39 +450,39 @@ frame_element::cfi_elements_for(core::Fde fde,
 		}
 	}
 	// visit them
-	typedef std::function<void(int, optional< pair<int, FrameSection::register_def> >)>
+	typedef std::function<void(int, optional<FrameSection::register_def>)>
 	 visitor_function;
 	int ra_rule_number = cie.get_return_address_register_rule();
-	auto visit_columns = [all_columns, ra_rule_number](
-		 visitor_function visit, 
-		 optional<const set< pair<int, FrameSection::register_def> > &> opt_i_row
+	auto visit_columns_of_row = [all_columns, ra_rule_number](
+		 visitor_function visit,
+		 optional<const set< pair<int, FrameSection::register_def> > &> maybe_row
 		) {
 
-		auto get_column = [&opt_i_row](int col) {
+		auto get_entry_at_column = [&maybe_row](int col) -> optional< FrameSection::register_def> {
 
-			if (!opt_i_row) return optional< pair<int, FrameSection::register_def> >();
+			if (!maybe_row) return optional< FrameSection::register_def>();
 			else
 			{
-				map<int, FrameSection::register_def> m(opt_i_row->begin(), opt_i_row->end());
+				map<int, FrameSection::register_def> m(maybe_row->begin(), maybe_row->end());
 				auto found = m.find(col);
-				return found != m.end() ? make_pair(found->first, found->second) : optional< pair<int, FrameSection::register_def> >();
+				return found != m.end() ? found->second : optional<FrameSection::register_def>();
 			}
 		};
 
 		// always visit CFA column
-		visit(DW_FRAME_CFA_COL3, get_column(DW_FRAME_CFA_COL3));
+		visit(DW_FRAME_CFA_COL3, get_entry_at_column(DW_FRAME_CFA_COL3));
 
 		// visit other columns that exist, except the ra rule for now
 		for (auto i_col = all_columns.begin(); i_col != all_columns.end(); ++i_col)
 		{
 			if (*i_col != DW_FRAME_CFA_COL3 && *i_col != ra_rule_number)
 			{
-				visit(*i_col, get_column(*i_col));
+				visit(*i_col, get_entry_at_column(*i_col));
 			}
 		}
 
 		// finally, always visit the ra rule 
-		visit(ra_rule_number, get_column(ra_rule_number));
+		visit(ra_rule_number, get_entry_at_column(ra_rule_number));
 	};
 
 #ifndef NDEBUG
@@ -529,28 +526,63 @@ frame_element::cfi_elements_for(core::Fde fde,
 
 	visitor_function row_column_visitor = [all_columns, ra_rule_number,
 		fde_lopc, fde_hipc, &out]
-		(int col, optional< pair<int, FrameSection::register_def> > found_col)  -> void {
+		(int col, optional<FrameSection::register_def> found_ent)  -> void {
 
-		if (!found_col /*|| !is_callee_save_register(col)*/) {} // s << std::left << "u" << std::right;
+		if (!found_ent /*|| !is_callee_save_register(col)*/) {} // s << std::left << "u" << std::right;
 		else
 		{
 			auto the_interval = boost::icl::discrete_interval<Dwarf_Addr>::right_open(
 				fde_lopc,
 				fde_hipc
 			);
-			int regnum; // used by saved-in-register cases
+			int regnum = -1; // used by saved-in-register cases
+			int regoff = 0; // used by CFA-as-if-in-register case
 			shared_ptr<loc_expr> p_expr; // used by all non-trivial cases
 			int saved_offset; // used by saved-at-offset-from-cfa, val-is-offset-from-cfa
-			switch (found_col->second.k)
+			/* The kinds often mean something different when we're talking about the CFA,
+			 * so do a switch on the pair <is_cfa, kind>. */
+#define PAIR(k, is_cfa) \
+			((((unsigned) is_cfa)<<16) | (short) k)
+			switch (PAIR(found_ent->k, col == DW_FRAME_CFA_COL3))
 			{
-				case FrameSection::register_def::INDETERMINATE:
-				case FrameSection::register_def::UNDEFINED: 
+				case PAIR(/* is_cfa */ false, FrameSection::register_def::INDETERMINATE):
+				case PAIR(/* is_cfa */ true, FrameSection::register_def::INDETERMINATE):
+				case PAIR(/* is_cfa */ false, FrameSection::register_def::UNDEFINED):
+				case PAIR(/* is_cfa */ true, FrameSection::register_def::UNDEFINED):
 					break;
-				case FrameSection::register_def::REGISTER:
+				case PAIR(/* is_cfa */ false, FrameSection::register_def::REGISTER):
 					// caller's register "col" is saved in callee register "regnum"
-					regnum = found_col->second.register_plus_offset_r().first;
+					regnum = found_ent->register_plus_offset_r().first;
+					assert(col != DW_FRAME_CFA_COL3);
+					assert(regnum != DW_FRAME_CFA_COL3);
 					goto saved_in_regnum;
-				case FrameSection::register_def::SAME_VALUE:
+				case PAIR(/* is_cfa */ true, FrameSection::register_def::REGISTER):
+					regnum = found_ent->register_plus_offset_r().first;
+					regoff = found_ent->register_plus_offset_r().second;
+					// the CFA *is* the value of register "regnum", plus "offset"
+					// What stops us from modelling this just like VAL_IS_EXPR?
+					// well, we do but we have to pull out the expression from
+					// register_plus_offset_r()  and not  val_of_expr_r()
+
+					/* The interpretation of found_ent is a bit different for CFA...
+					 * the second field of the pair, i.e. "offset", is significant,
+					 * and despite being a REGISTER rule, CFA is not saved in a register.
+					 * We do want to treat this as a frame element but most of our
+					 * clients should ignore it. But how do we faithfully represent
+					 * the offset part? I think we should treat it like VAL_OF_EXPR.
+					 * We read the value of the given register, add the offset, and
+					 * the resulting value (on our operand stack, thanks to bregn)
+					 * is the *value* of the CFA, i.e. not a place where it is stored.
+					 */
+					p_expr = make_shared<loc_expr>(loc_expr(
+					 /* expr */ { (expr_instr) { .lr_atom = DW_OP_breg0 + regnum,
+					                             .lr_number = regoff },
+					              (expr_instr) { .lr_atom = DW_OP_stack_value }
+					            }
+					));
+					goto saved_with_loc_expr;
+				case PAIR(/* is_cfa */ false, FrameSection::register_def::SAME_VALUE):
+				case PAIR(/* is_cfa */ true,  FrameSection::register_def::SAME_VALUE):
 					// "This register has not been modified from the previous frame.
 					// (By convention, it is preserved by the callee, but the callee
 					// has not modified it.)"
@@ -559,18 +591,28 @@ frame_element::cfi_elements_for(core::Fde fde,
 					regnum = col;
 					goto saved_in_regnum;
 				saved_in_regnum:
+					assert(regnum != DW_FRAME_CFA_COL3);
 					assert(regnum <= 31);
+					assert(regnum >= 0);
 					p_expr = make_shared<loc_expr>(loc_expr(
 						{ (expr_instr) { .lr_atom = DW_OP_reg0 + regnum } }));
 					goto saved_with_loc_expr;
-				case FrameSection::register_def::SAVED_AT_OFFSET_FROM_CFA:
+				case PAIR(/* is_cfa */ true, FrameSection::register_def::SAVED_AT_OFFSET_FROM_CFA):
+					assert(false);
+				case PAIR(/* is_cfa */ false, FrameSection::register_def::SAVED_AT_OFFSET_FROM_CFA):
 					// caller's register "col" is saved at "saved_offset" from CFA
-					saved_offset = found_col->second.saved_at_offset_from_cfa_r();
+					saved_offset = found_ent->saved_at_offset_from_cfa_r();
+					if (col == DW_FRAME_CFA_COL3) std::cerr << "Problem is saved-at-offset from CFA " << std::endl;
+					assert(col != DW_FRAME_CFA_COL3);
 					goto offset_from_cfa_cases;
-				case FrameSection::register_def::VAL_IS_OFFSET_FROM_CFA:
+				case PAIR(/* is_cfa */ true, FrameSection::register_def::VAL_IS_OFFSET_FROM_CFA):
+					assert(false);
+				case PAIR(/* is_cfa */ false, FrameSection::register_def::VAL_IS_OFFSET_FROM_CFA):
 					// caller's register "col" is not saved, but has the value computable
 					// as "cfa + integer-value"
-					saved_offset = found_col->second.val_is_offset_from_cfa_r();
+					if (col == DW_FRAME_CFA_COL3) std::cerr << "Problem is val-is-offset from CFA" << std::endl;
+					assert(col != DW_FRAME_CFA_COL3);
+					saved_offset = found_ent->val_is_offset_from_cfa_r();
 					goto offset_from_cfa_cases;
 				offset_from_cfa_cases:
 					p_expr = make_shared<loc_expr>(loc_expr(
@@ -578,20 +620,44 @@ frame_element::cfi_elements_for(core::Fde fde,
 						  (expr_instr) { .lr_atom = DW_OP_consts, .lr_number = saved_offset },
 						  (expr_instr) { .lr_atom = DW_OP_plus } }
 					));
-					if (found_col->second.k == FrameSection::register_def::VAL_IS_OFFSET_FROM_CFA)
+					if (found_ent->k == FrameSection::register_def::VAL_IS_OFFSET_FROM_CFA)
 					{ p_expr->push_back((expr_instr) { .lr_atom = DW_OP_stack_value }); }
 					goto saved_with_loc_expr;
-				case FrameSection::register_def::SAVED_AT_EXPR:
+				case PAIR(/* is_cfa */ false, FrameSection::register_def::SAVED_AT_EXPR):
 					// caller's register "col" is saved at location given by <expr>
 					p_expr = make_shared<loc_expr>(loc_expr(
-						found_col->second.saved_at_expr_r()
+						found_ent->saved_at_expr_r()
 					));
 					goto saved_with_loc_expr;
-				case FrameSection::register_def::VAL_OF_EXPR:
-					// caller's register "col" is not saved, but has the value computable
-					// as "<expr>"
+				case PAIR(/* is_cfa */ true, FrameSection::register_def::SAVED_AT_EXPR):
+					/* Another case that is different for the CFA. E.g. the following
+					 * will hit this case.
+00003340 0000000000000020 00003344 FDE cie=00000000 pc=0000000000001000..0000000000001050
+  DW_CFA_def_cfa_offset: 16
+  DW_CFA_advance_loc: 6 to 0000000000001006
+  DW_CFA_def_cfa_offset: 24
+  DW_CFA_advance_loc: 10 to 0000000000001010
+  DW_CFA_def_cfa_expression (DW_OP_breg7 (rsp): 8; DW_OP_breg16 (rip): 0; DW_OP_lit15; DW_OP_and; DW_OP_lit11; DW_OP_ge; DW_OP_lit3; DW_OP_shl; DW_OP_plus)
+
+					 * was seeing regnum 7 here, which is RSP, i.e. "CFA" is "saved in" RSP?
+					 * makes no sense! Really means "CFA's value *is* this expression", so... */
 					p_expr = make_shared<loc_expr>(loc_expr(
-						found_col->second.val_of_expr_r()
+						found_ent->saved_at_expr_r()
+					));
+					p_expr->push_back((expr_instr) { .lr_atom = DW_OP_stack_value });
+					goto saved_with_loc_expr;
+#if 0
+						// seeing regnum 7 here, which is RSP, i.e. "CFA" is "saved in" RSP?
+						// makes no sense, and is not in the FDE...
+						std::cerr << "Problematic regnum is " << regnum << std::endl;
+#endif
+				case PAIR(/* is_cfa */ true, FrameSection::register_def::VAL_OF_EXPR):
+					assert(false);
+				case PAIR(/* is_cfa */ false, FrameSection::register_def::VAL_OF_EXPR):
+					// caller's register "col" is not saved per se, but has the value
+					// computable as "<expr>"
+					p_expr = make_shared<loc_expr>(loc_expr(
+						found_ent->val_of_expr_r()
 					));
 					p_expr->push_back((expr_instr) { .lr_atom = DW_OP_stack_value });
 					goto saved_with_loc_expr;
@@ -617,7 +683,7 @@ frame_element::cfi_elements_for(core::Fde fde,
 	// process the row contents
 	for (auto i_int = result.rows.begin(); i_int != result.rows.end(); ++i_int)
 	{
-		visit_columns(row_column_visitor, i_int->second);
+		visit_columns_of_row(row_column_visitor, i_int->second);
 	}
 
 // FIXME: do we get the return address as a saved program counter? if not, how can we?

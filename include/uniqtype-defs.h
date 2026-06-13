@@ -32,13 +32,15 @@ of or in connection with the use or performance of this software.
 #endif
 #ifndef _Static_assert
 #define _Static_assert static_assert
-#define _uniqtype_efs_h_defined__Static_assert
+#define _uniqtype_defs_h_defined__Static_assert
 #endif
 extern "C" {
-#else
+#else /* C */
 #ifndef ALIGNOF
 #define ALIGNOF(t) _Alignof(t)
 #define _uniqtype_defs_h_defined_ALIGNOF
+//#else
+//#error "ALIGNOF already defined"
 #endif
 #endif
 
@@ -429,8 +431,8 @@ do { \
 #undef _uniqtype_defs_h_defined_ALIGNOF
 #undef ALIGNOF
 #endif
-#ifdef _uniqtype_efs_h_defined__Static_assert
-#undef _uniqtype_efs_h_defined__Static_assert
+#ifdef _uniqtype_defs_h_defined__Static_assert
+#undef _uniqtype_defs_h_defined__Static_assert
 #undef _Static_assert
 #endif /* we defined _Static_assert */
 
