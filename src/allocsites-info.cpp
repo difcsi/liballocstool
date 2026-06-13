@@ -584,7 +584,8 @@ int read_allocs_line(
 	}
 	else
 	{
-		/* No typename... */
+		alloc_typename = opt<string>();
+		might_be_array = true;
 	}
 
 	return 0;
