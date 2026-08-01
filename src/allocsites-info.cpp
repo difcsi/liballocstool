@@ -523,11 +523,9 @@ optional<vector<allocsite> > read_allocsites_for_binary(const string& s)
 	
 	string full_path = string(getenv("META_BASE")?:"/usr/lib/meta") + "/" + real_path + ".allocs";
 	std::ifstream in(full_path);
-	if (in)
-	{
-		return read_allocsites(in);
-	}
-	else return opt<vector<allocsite> >();
+	auto result = in ? read_allocsites(in) : opt<vector<allocsite> >();
+	free(real_path);
+	return result;
 }
 
 int read_allocs_line(
