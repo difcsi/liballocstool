@@ -60,12 +60,6 @@ const char *(__attribute__((pure,weak)) __liballocs_uniqtype_name)(const struct 
 /* make ARRAY equal 1, and the others use even numbers.                         */ \
 enum uniqtype_kind { VOID, ARRAY = 0x1, BASE = 0x2, ENUMERATION = 0x4, COMPOSITE = 0x6, \
     ADDRESS = 0x8, SUBPROGRAM = 0xa, SUBRANGE = 0xc }; \
-struct alloc_addr_info \
-{ \
-	unsigned long addr:47; \
-	unsigned flag:1; \
-	unsigned bits:16; \
-}; \
 /* For a struct, we have at least three fields: name, offset, type. 	 */ \
 /* In fact we might want *more* than that: a flag to say whether it's an */ \
 /* offset or an absolute address (to encode the mcontext case). HMM.	 */ \
@@ -109,7 +103,6 @@ typedef struct uniqtype *make_precise_fn_t(struct uniqtype *in, \
    void *obj, void *alloc_base, unsigned long alloc_sz, void *ip, struct mcontext *ctxt); \
 struct uniqtype \
 { \
-   struct alloc_addr_info cache_word; \
    unsigned pos_maxoff; /* positive size in bytes, or UINT_MAX for unbounded/unrep'able */ \
    union { /* keep this 32 bits long */ \
        struct { \
@@ -161,7 +154,6 @@ struct uniqtype \
        } array; /* related[0] is element type */ \
        unsigned as_word; /* for funky optimizations, e.g. "== -1" to test for unbounded array */ \
    } un; \
-   make_precise_fn_t *make_precise; /* NULL means identity function AND that we're concrete */ \
    struct uniqtype_rel_info related[]; \
 }; \
 _Static_assert(ALIGNOF(struct uniqtype) >= 8, "alignment of struct uniqtype should be 8 or more"); \
@@ -380,7 +372,10 @@ extern struct uniqtype __uniqtype____uninterpreted_byte; // byte
 	|| ((u)->un.info.kind == SUBRANGE && 1 /* FIXME */) \
 	|| ((u)->un.info.kind == SUBPROGRAM && (u)->related[0].un.t.ptr != NULL) \
 	)
-#define UNIQTYPE_IS_ABSTRACT(u) ((u)->make_precise)
+#define UNIQTYPE_MAKE_PRECISE_FN(u) \
+   ((UNIQTYPE_IS_ARRAY_TYPE(u) && (u)->un.array.nelems == UNIQTYPE_ARRAY_LENGTH_UNBOUNDED) \
+      ? __liballocs_make_array_precise_with_memory_bounds : (make_precise_fn_t *) 0)
+#define UNIQTYPE_IS_ABSTRACT(u) (UNIQTYPE_MAKE_PRECISE_FN(u) != (make_precise_fn_t *) 0)
 #define NAME_FOR_UNIQTYPE(u) UNIQTYPE_NAME(u)
 #define UNIQTYPE_BASE_TYPE_BIT_SIZE(u)         (((u)->un.info.kind != BASE) ? 0 : \
                                                    8*(u)->pos_maxoff - ( \

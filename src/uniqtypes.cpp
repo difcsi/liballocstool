@@ -1437,7 +1437,6 @@ static void write_uniqtype_open_generic(std::ostream& o,
 	o << "struct uniqtype " << mangled_typename
 	  << attributes_for_uniqtype(mangled_typename, make_weak_definition, use_section_group)
 	  << " = {\n\t"
-	  << "{ 0, 0, 0 },\n\t"
 	  << pos_maxoff_str << " /* pos_maxoff */,\n\t";
 }
 
@@ -1462,7 +1461,7 @@ void write_uniqtype_open_void(std::ostream& o,
 {
 	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, 0);
 	o << "{ _void: { VOID } },\n\t"
-		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+		<< "/* related */ {\n\t\t";
 }
 void write_uniqtype_open_array(std::ostream& o,
 	const string& mangled_typename,
@@ -1476,7 +1475,7 @@ void write_uniqtype_open_array(std::ostream& o,
 {
 	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
 	o << "{ array: { 1, " << nelems << " } },\n\t"
-		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+		<< "/* related */ {\n\t\t";
 }
 void write_uniqtype_open_flex_array(std::ostream& o,
 	const string& mangled_typename,
@@ -1489,7 +1488,7 @@ void write_uniqtype_open_flex_array(std::ostream& o,
 	std::ostringstream s; s << UNIQTYPE_POS_MAXOFF_UNBOUNDED;
 	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, s.str());
 	o << "{ array: { 1, " << UNIQTYPE_ARRAY_LENGTH_UNBOUNDED << " } },\n\t"
-		<< "/* make_precise */ __liballocs_make_array_precise_with_memory_bounds, /* related */ {\n\t\t";
+		<< "/* related */ {\n\t\t";
 }
 void write_uniqtype_open_address(std::ostream& o,
 	const string& mangled_typename,
@@ -1507,7 +1506,7 @@ void write_uniqtype_open_address(std::ostream& o,
 		use_section_group, make_weak_definition);
 	o << "{ address: { ADDRESS, " << indir_level << ", " << is_generic << ", " << log_min_align
 		<< " } },\n\t"
-		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+		<< "/* related */ {\n\t\t";
 }
 void write_uniqtype_open_base(std::ostream& o,
 	const string& mangled_typename,
@@ -1528,7 +1527,7 @@ void write_uniqtype_open_base(std::ostream& o,
 		<< ", " << bit_size_delta_delta
 		<< ", " << bit_off
 		<< " } },\n\t"
-		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+		<< "/* related */ {\n\t\t";
 }
 void write_uniqtype_open_subrange(std::ostream& o,
 	const string& mangled_typename,
@@ -1545,7 +1544,7 @@ void write_uniqtype_open_subrange(std::ostream& o,
 	o << "{ subrange: { SUBRANGE, " << min
 		<< ", " << max
 		<< " } },\n\t"
-		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+		<< "/* related */ {\n\t\t";
 }
 void write_uniqtype_open_enumeration(std::ostream& o,
 	const string& mangled_typename,
@@ -1558,7 +1557,7 @@ void write_uniqtype_open_enumeration(std::ostream& o,
 {
 	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff, use_section_group, make_weak_definition);
 	o << "{ enumeration: { ENUMERATION, 0, 0, 0 } },\n\t"
-		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+		<< "/* related */ {\n\t\t";
 }
 void write_uniqtype_open_composite(std::ostream& o,
 	const string& mangled_typename,
@@ -1575,7 +1574,7 @@ void write_uniqtype_open_composite(std::ostream& o,
 	o << "{ composite: { COMPOSITE, " << nmemb
 		<< ", " << not_simultaneous 
 		<< " } },\n\t"
-		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+		<< "/* related */ {\n\t\t";
 }
 void write_uniqtype_open_subprogram(std::ostream& o,
 	const string& mangled_typename,
@@ -1596,7 +1595,7 @@ void write_uniqtype_open_subprogram(std::ostream& o,
 		<< ", " << is_va
 		<< ", " << cc
 		<< " } },\n\t"
-		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+		<< "/* related */ {\n\t\t";
 	
 }
 void write_uniqtype_related_array_element_type(std::ostream& o,
