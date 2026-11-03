@@ -896,9 +896,13 @@ void write_master_relation(master_relation_t& r,
 			auto k1 = codeful_name(t->get_type());
 			string mangled_name1 = mangle_typename(k1);
 			write_uniqtype_related_pointee_type(out, mangled_name1);
-			auto k2 = codeful_name(ultimate_pointee);
-			string mangled_name2 = mangle_typename(k2);
-			write_uniqtype_related_ultimate_pointee_type(out, mangled_name2);
+			if (!is_generic && indir_level > 1)
+			{
+				auto k2 = codeful_name(ultimate_pointee);
+				string mangled_name2 = mangle_typename(k2);
+				write_uniqtype_related_ultimate_pointee_type(out, mangled_name2);
+				++contained_length;
+			}
 		}
 		else if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
